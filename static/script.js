@@ -23,7 +23,7 @@ async function loadRepo() {
     const data = await resp.json();
     document.getElementById("files").textContent = data.message;
   } catch (e) {
-    document.getElementById("files").textContent = "Error: " + e.message;
+    document.getElementById("files").textContent = "";
   }
 }
 
