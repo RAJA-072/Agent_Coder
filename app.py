@@ -86,12 +86,30 @@ def sanitize_answer(s: str) -> str:
 def build_system_prompt(metadata: dict, files: list, digest_snippet: str, persona: str):
     """Build system prompt for Gemini model."""
     meta_pretty = json.dumps(metadata, indent=2, ensure_ascii=False)
-    files_block = "\n".join(f"- {p}" for p in files[:50]) or "(no files found)"
+    files_block = "\n".join(f"- {p}" for p in files[:20]) or "(no files found)"
+    # Few-shot examples for each persona
+    examples = {
+        "student (beginner)": "Q: What does this repo do?\nA: This project is like a recipe book for computers. It helps you do X by following simple steps.\n\nQ: What is a function here?\nA: A function is like a mini-machine that does a specific job, such as adding numbers.",
+        "student (intermediate)": "Q: How does the main module work?\nA: The main module loads data, processes it, and outputs results. It uses functions like load_data() and process().\n\nQ: What is the role of requirements.txt?\nA: It lists the Python packages needed to run the project.",
+        "student (advanced)": "Q: How is error handling implemented?\nA: The code uses try/except blocks to catch exceptions, especially in data loading and API calls.\n\nQ: How would you refactor the main loop?\nA: Consider extracting logic into smaller functions and using list comprehensions for clarity."
+    }
+    persona_instructions = {
+        "student (beginner)": "Explain concepts simply, use analogies, avoid jargon, and break down complex ideas. If the question is unclear, ask a clarifying question first.",
+        "student (intermediate)": "Give clear, step-by-step explanations. Use code snippets and bullet points. If the question is vague, ask for clarification.",
+        "student (advanced)": "Provide in-depth, technical answers. Use code, discuss trade-offs, and suggest improvements. If the question is ambiguous, request more detail."
+    }
+    persona = persona.lower().strip()
+    persona_key = persona if persona in examples else "student (beginner)"
+    # Feedback and output formatting
+    feedback_note = "If this answer was helpful, let us know! If not, please suggest how it could be improved."
     return f"""
-You are a helpful software engineering assistant acting as a {persona}.
-Answer ONLY about the repository itself.
-Do not mention cloning or scraping.
-If you are unsure, say you don't know.
+You are a helpful assistant for a {persona_key}.
+{persona_instructions[persona_key]}
+Always answer ONLY about the repository itself. Do not mention cloning or scraping. If you are unsure, say you don't know.
+Format your answer in markdown with bullet points, code blocks, and headings where appropriate.
+
+Here are some example Q&A for your style:
+{examples[persona_key]}
 
 Repository metadata:
 {meta_pretty}
@@ -101,6 +119,8 @@ Important files (truncated):
 
 Digest excerpt (truncated):
 {digest_snippet}
+
+{feedback_note}
 """.strip()
 
 
@@ -146,29 +166,40 @@ def ask():
     """Answer user questions about the repo."""
     data = request.get_json(force=True)
     question = (data.get("question") or "").strip()
-    persona = (data.get("persona") or "senior developer").strip()
+    persona = (data.get("persona") or "student (beginner)").strip()
 
     if not question:
         return jsonify({"error": "Missing question."}), 400
     if "digest" not in repo_cache:
-        return jsonify({"error": "No repository loaded yet."}), 400
+        return jsonify({"error": "No repository loaded yet. Please load a repository first."}), 400
     if not GEMINI_API_KEY:
         return jsonify({"error": "Gemini API key not configured. Set GEMINI_API_KEY env var."}), 500
+
+    # Persona memory: store last used persona in cache
+    repo_cache["last_persona"] = persona
 
     try:
         digest = repo_cache["digest"]
         files = repo_cache.get("files", [])
         metadata = repo_cache["metadata"]
 
+        # Context limiting: only most relevant files (top 20)
         system_prompt = build_system_prompt(metadata, files, digest[:8000], persona)
-        user_prompt = f"Question: {question}\nAnswer clearly and concisely for a {persona}. Avoid markdown symbols."
+        # Clarifying question logic
+        if len(question.split()) < 3:
+            user_prompt = f"The user question is very short. If you need clarification, ask a clarifying question first.\nQuestion: {question}\nAnswer for a {persona}."
+        else:
+            user_prompt = f"Question: {question}\nAnswer for a {persona}."
 
         model = genai.GenerativeModel(MODEL_NAME)
         response = model.generate_content(system_prompt + "\n\n" + user_prompt)
         text = getattr(response, "text", str(response))
-        return jsonify({"answer": sanitize_answer(text)})
+        # Error handling: check for empty or generic answers
+        if not text or text.strip().lower() in {"i don't know", "not sure", "unknown"}:
+            return jsonify({"answer": "Sorry, I couldn't find an answer. Please try rephrasing your question or ask for a specific file/module."})
+        return jsonify({"answer": text.strip()})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
 
 @app.route("/process_repo", methods=["POST"])
@@ -207,6 +238,4 @@ def health():
 
 
 if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(debug=True)

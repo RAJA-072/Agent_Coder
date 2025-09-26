@@ -9,21 +9,28 @@ async function loadRepo() {
     return;
   }
 
-  document.getElementById("files").textContent = "Loading repository…";
-
+  const filesDiv = document.getElementById("files");
+  filesDiv.textContent = "Loading repository…";
   try {
     const resp = await fetch("/load_repo", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: "repo_url=" + encodeURIComponent(repoUrl),
     });
-
-    if (!resp.ok) throw new Error("Failed to load repo");
-
-    const data = await resp.json();
-    document.getElementById("files").textContent = data.message;
+    let data;
+    try {
+      data = await resp.json();
+    } catch (jsonErr) {
+      filesDiv.textContent = "";
+      return;
+    }
+    if (!resp.ok) {
+      filesDiv.textContent = "Error: " + (data.error || "Failed to load repository");
+      return;
+    }
+    filesDiv.textContent = data.message;
   } catch (e) {
-    document.getElementById("files").textContent = "Error: " + e.message;
+    filesDiv.textContent = "Error: " + e.message;
   }
 }
 
@@ -73,8 +80,9 @@ async function generateSummary() {
     return;
   }
 
-  document.getElementById("summary-box").textContent = "Generating summary…";
-
+  const summaryBox = document.getElementById("summary-box");
+  summaryBox.textContent = "Generating summary…";
+  let data = null;
   try {
     const formData = new FormData();
     formData.append("role", role);
@@ -85,12 +93,20 @@ async function generateSummary() {
       body: formData,
     });
 
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || "Failed");
-
-    document.getElementById("summary-box").textContent = data.summary;
+    try {
+      data = await resp.json();
+    } catch (jsonErr) {
+      // Only show error if fetch itself fails, not before
+      summaryBox.textContent = "Error: Unexpected response. Please check the backend.";
+      return;
+    }
+    if (!resp.ok) {
+      summaryBox.textContent = "Error: " + (data.error || "Failed");
+      return;
+    }
+    summaryBox.textContent = data.summary;
   } catch (e) {
-    document.getElementById("summary-box").textContent = "Error: " + e.message;
+    summaryBox.textContent = "Error: " + e.message;
   }
 }
 
