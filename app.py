@@ -238,4 +238,10 @@ def health():
 
 
 if __name__ == "__main__":
+<<<<<<< HEAD
     app.run(debug=True)
+=======
+    import os
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+>>>>>>> 08033e73e0d8f394173dc1913c9f3a0d4bd17a2f
